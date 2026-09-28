@@ -15,7 +15,7 @@ import {
 } from "@/lib/constants";
 import { getSafeErrorMessage, isValidUUID, formatDateID } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Business, Product, Task, ComplianceCase } from "@/types";
 
@@ -30,12 +30,8 @@ export default function ConsultantClientDetailPage() {
     queryKey: ["consultant-client-business", orgId],
     enabled: Boolean(orgId),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("*")
-        .eq("organization_id", orgId!);
-      if (error) throw error;
-      return (data ?? []) as Business[];
+      const data = await api.get<Business[]>(`/api/organizations/${orgId}/businesses`);
+      return data;
     },
   });
 
@@ -45,12 +41,10 @@ export default function ConsultantClientDetailPage() {
     queryKey: ["consultant-client-products", business?.id],
     enabled: Boolean(business?.id),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("business_id", business!.id);
-      if (error) throw error;
-      return (data ?? []) as Product[];
+      const data = await api.get<Product[]>(
+        `/api/organizations/${orgId}/products`
+      );
+      return data.filter((p) => p.business_id === business!.id);
     },
   });
 
@@ -58,12 +52,10 @@ export default function ConsultantClientDetailPage() {
     queryKey: ["consultant-client-cases", business?.id],
     enabled: Boolean(business?.id),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("compliance_cases")
-        .select("*")
-        .eq("business_id", business!.id);
-      if (error) throw error;
-      return (data ?? []) as ComplianceCase[];
+      const data = await api.get<ComplianceCase[]>(
+        `/api/organizations/${orgId}/compliance-cases`
+      );
+      return data;
     },
   });
 
@@ -71,13 +63,8 @@ export default function ConsultantClientDetailPage() {
     queryKey: ["consultant-client-tasks", orgId],
     enabled: Boolean(orgId),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("*")
-        .eq("organization_id", orgId!)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as Task[];
+      const data = await api.get<Task[]>(`/api/organizations/${orgId}/tasks`);
+      return data;
     },
   });
 
@@ -86,13 +73,11 @@ export default function ConsultantClientDetailPage() {
     const title = window.prompt("Judul task untuk klien:");
     if (!title) return;
     try {
-      const { error } = await supabase.from("tasks").insert({
-        organization_id: orgId,
+      await api.post(`/api/organizations/${orgId}/tasks`, {
         title,
         status: "todo",
         priority: "medium",
       });
-      if (error) throw error;
       queryClient.invalidateQueries({
         queryKey: ["consultant-client-tasks", orgId],
       });
@@ -104,11 +89,7 @@ export default function ConsultantClientDetailPage() {
 
   const handleApproveChecklist = async (caseId: string) => {
     try {
-      const { error } = await supabase
-        .from("compliance_cases")
-        .update({ status: "ready_to_submit" })
-        .eq("id", caseId);
-      if (error) throw error;
+      await api.patch(`/api/compliance/cases/${caseId}`, { status: "ready_to_submit" });
       queryClient.invalidateQueries({
         queryKey: ["consultant-client-cases", business?.id],
       });
@@ -123,11 +104,7 @@ export default function ConsultantClientDetailPage() {
 
   const handleRequestRevision = async (caseId: string) => {
     try {
-      const { error } = await supabase
-        .from("compliance_cases")
-        .update({ status: "revision" })
-        .eq("id", caseId);
-      if (error) throw error;
+      await api.patch(`/api/compliance/cases/${caseId}`, { status: "revision" });
       queryClient.invalidateQueries({
         queryKey: ["consultant-client-cases", business?.id],
       });

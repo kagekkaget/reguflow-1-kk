@@ -5,16 +5,17 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   registerSchema,
   type RegisterInput,
 } from "@/lib/validation";
 import { getSafeErrorMessage } from "@/lib/utils";
+import { useAuthStore } from "@/lib/api/auth-store";
 
 export default function RegisterPage() {
   const toast = useToast();
   const navigate = useNavigate();
+  const signUp = useAuthStore((s) => s.signUp);
   const [loading, setLoading] = useState(false);
 
   const {
@@ -32,65 +33,19 @@ export default function RegisterPage() {
   const acceptTerms = watch("acceptTerms");
 
   const onSubmit = async (data: RegisterInput) => {
-    if (!isSupabaseConfigured) {
-      toast.error(
-        "Belum bisa daftar",
-        "Supabase belum dikonfigurasi. Hubungi admin atau set file .env."
-      );
-      return;
-    }
-
     setLoading(true);
     try {
-      const { data: signUpData, error } = await supabase.auth.signUp({
+      // Backend membuat user + organisasi default + membership sekaligus.
+      await signUp({
         email: data.email,
         password: data.password,
-        options: {
-          data: {
-            full_name: data.full_name,
-            phone: data.whatsapp,
-          },
-        },
+        full_name: data.full_name,
+        phone: data.whatsapp,
       });
-
-      if (error) {
-        const message =
-          error.message?.includes("already registered")
-            ? "Email sudah terdaftar. Silakan login."
-            : "Pendaftaran gagal. Coba lagi.";
-        toast.error("Pendaftaran gagal", message);
-        return;
-      }
-
-      // Buat organisasi default (type business) untuk UMKM baru
-      if (signUpData.user) {
-        try {
-          const { data: org } = await supabase
-            .from("organizations")
-            .insert({
-              name: `Usaha ${data.full_name}`,
-              type: "business",
-              created_by: signUpData.user.id,
-            })
-            .select()
-            .single();
-
-          if (org) {
-            await supabase.from("organization_members").insert({
-              organization_id: org.id,
-              user_id: signUpData.user.id,
-              role: "owner",
-              status: "active",
-            });
-          }
-        } catch {
-          // Jika organisasi gagal dibuat, user tetap bisa lanjut via onboarding
-        }
-      }
 
       toast.success(
         "Pendaftaran berhasil!",
-        "Cek email kamu untuk verifikasi (jika diminta), lalu login."
+        "Akun kamu sudah siap. Lanjut lengkapi data usaha."
       );
       navigate("/onboarding", { replace: true });
     } catch (error) {

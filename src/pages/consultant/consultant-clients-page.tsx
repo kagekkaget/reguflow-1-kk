@@ -6,12 +6,45 @@ import { Input, Select } from "@/components/ui/input";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { ENGAGEMENT_STATUS_LABELS, ENGAGEMENT_STATUS_TONES } from "@/lib/constants";
 import { formatDateID, debounce } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import type { ConsultantEngagement } from "@/types";
+
+type ApiEngagement = {
+  id: string;
+  businessOrganizationId: string;
+  consultantOrganizationId: string;
+  packageName: string | null;
+  scope: string | null;
+  status: ConsultantEngagement["status"];
+  price: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  businessOrganizationName: string;
+};
+
+function mapEngagement(e: ApiEngagement): ConsultantEngagement {
+  return {
+    id: e.id,
+    business_organization_id: e.businessOrganizationId,
+    consultant_organization_id: e.consultantOrganizationId,
+    package_name: e.packageName,
+    scope: e.scope,
+    status: e.status,
+    price: e.price,
+    started_at: e.startedAt,
+    ended_at: e.endedAt,
+    created_at: e.createdAt,
+    updated_at: e.updatedAt,
+    business_organization: { id: e.businessOrganizationId, name: e.businessOrganizationName },
+    consultant_organization: null,
+  };
+}
 
 export default function ConsultantClientsPage() {
   const activeOrgId = useAuthStore((s) => s.activeOrganizationId);
@@ -24,17 +57,12 @@ export default function ConsultantClientsPage() {
     queryKey: ["consultant-engagements-list", activeOrgId],
     enabled: Boolean(activeOrgId),
     queryFn: async () => {
-      const baseQuery = supabase
-        .from("consultant_engagements")
-        .select(
-          "*, business_organization:organizations!consultant_engagements_business_organization_id_fkey(id, name)"
-        );
-      const query = !isPlatformAdmin && activeRole === "consultant"
-        ? baseQuery.eq("consultant_organization_id", activeOrgId!)
-        : baseQuery;
-      const { data, error } = await query.order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as ConsultantEngagement[];
+      const data = await api.get<ApiEngagement[]>("/api/engagements");
+      // Filter client-side: consultant only sees engagements where they are the consultant
+      const filtered = (!isPlatformAdmin && activeRole === "consultant")
+        ? data.filter((e) => e.consultantOrganizationId === activeOrgId)
+        : data;
+      return filtered.map(mapEngagement);
     },
   });
 

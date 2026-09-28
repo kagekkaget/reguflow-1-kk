@@ -9,8 +9,8 @@ import { LoadingState } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { Field, Input, Select, Checkbox, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { useBusiness, useProducts, queryKeys } from "@/hooks/use-queries";
 import { productSchema, type ProductFormInput } from "@/lib/validation";
 import {
@@ -19,7 +19,6 @@ import {
   SALES_CHANNELS,
 } from "@/lib/constants";
 import { getSafeErrorMessage } from "@/lib/utils";
-import { logAudit } from "@/lib/security/audit";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -57,7 +56,7 @@ export default function ProdukListPage() {
     }
     setSaving(true);
     try {
-      const { error } = await supabase.from("products").insert({
+      await api.post("/api/products", {
         business_id: businessId,
         name: values.name,
         sku: values.sku || null,
@@ -75,12 +74,6 @@ export default function ProdukListPage() {
         packaging_type: values.packaging_type || null,
         sales_channel: values.sales_channel || null,
         status: "active",
-      });
-      if (error) throw error;
-      await logAudit({
-        organizationId: activeOrgId,
-        action: "task_created",
-        entityType: "product",
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.products });
       toast.success("Produk ditambahkan", values.name);

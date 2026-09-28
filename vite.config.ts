@@ -17,7 +17,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom"],
-          supabase: ["@supabase/supabase-js"],
           query: ["@tanstack/react-query"],
           form: ["react-hook-form", "zod", "@hookform/resolvers"],
         },

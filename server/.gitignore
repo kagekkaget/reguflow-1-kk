@@ -1,0 +1,21 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Storage upload (dokumen privat)
+storage
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Drizzle
+migrations/meta

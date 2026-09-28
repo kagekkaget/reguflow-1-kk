@@ -16,7 +16,7 @@ import {
 } from "@/lib/constants";
 import { useCreateTask, useTasks, queryKeys } from "@/hooks/use-queries";
 import { getSafeErrorMessage, formatDateID, relativeDateLabel, daysUntil } from "@/lib/utils";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Task, TaskPriority, TaskStatus } from "@/types";
 
@@ -68,11 +68,7 @@ export default function TasksPage() {
 
   const handleStatusUpdate = async (task: Task, status: TaskStatus) => {
     try {
-      const { error } = await supabase
-        .from("tasks")
-        .update({ status })
-        .eq("id", task.id);
-      if (error) throw error;
+      await api.patch(`/api/tasks/${task.id}`, { status });
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
       toast.success("Task diperbarui", TASK_STATUS_LABELS[status]);
     } catch (error) {

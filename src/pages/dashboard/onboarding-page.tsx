@@ -10,8 +10,8 @@ import { ScoreCard } from "@/components/ui/score-card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import {
   businessSchema,
   productSchema,
@@ -26,7 +26,6 @@ import {
   SALES_CHANNELS,
 } from "@/lib/constants";
 import { getSafeErrorMessage } from "@/lib/utils";
-import { logAudit } from "@/lib/security/audit";
 import { useComplianceScanner } from "@/hooks/use-scanner";
 import { useBusiness, useProducts } from "@/hooks/use-queries";
 import { useQueryClient } from "@tanstack/react-query";
@@ -107,34 +106,34 @@ export default function OnboardingPage() {
 
     const existing = existingBusiness?.[0];
     if (existing) {
-      const { error } = await supabase
-        .from("businesses")
-        .update(payload)
-        .eq("id", existing.id);
-      if (error) throw error;
-      await logAudit({
-        organizationId: activeOrgId,
-        action: "business_updated",
-        entityType: "business",
-        entityId: existing.id,
+      await api.put(`/api/businesses/${existing.id}`, {
+        legal_name: values.legal_name,
+        brand_name: values.brand_name || null,
+        nib: values.nib || null,
+        npwp: values.npwp || null,
+        entity_type: values.entity_type || "perorangan",
+        business_scale: values.business_scale || "mikro",
+        employee_count: typeof values.employee_count === "number" ? values.employee_count : 0,
+        annual_revenue: typeof values.annual_revenue === "number" ? values.annual_revenue : null,
+        address: values.address || null,
+        province: values.province || null,
+        city: values.city || null,
+        postal_code: values.postal_code || null,
+        kbli: values.kbli || null,
+        status: "active",
       });
       return existing.id;
     }
 
-    const { data, error } = await supabase
-      .from("businesses")
-      .insert(payload)
-      .select()
-      .single();
-    if (error) throw error;
-    return (data as { id: string }).id;
+    const data = await api.post<{ id: string }>("/api/businesses", payload);
+    return data.id;
   };
 
   const saveProduct = async (businessId: string) => {
     if (skippedProduct) return;
     const values = productForm.getValues();
     if (!values.name) return;
-    const { error } = await supabase.from("products").insert({
+    await api.post("/api/products", {
       business_id: businessId,
       name: values.name,
       sku: values.sku || null,
@@ -153,15 +152,11 @@ export default function OnboardingPage() {
       sales_channel: values.sales_channel || null,
       status: "active",
     });
-    if (error) throw error;
   };
 
   const markOnboardingComplete = async () => {
     if (!profile) return;
-    await supabase
-      .from("profiles")
-      .update({ onboarding_completed: true, onboarding_step: 4 })
-      .eq("id", profile.id);
+    await api.patch("/api/auth/me", { onboarding_completed: true, onboarding_step: 4 });
   };
 
   const handleSaveDraft = async () => {
@@ -177,10 +172,7 @@ export default function OnboardingPage() {
         await saveBusiness();
       }
       if (profile) {
-        await supabase
-          .from("profiles")
-          .update({ onboarding_step: step })
-          .eq("id", profile.id);
+        await api.patch("/api/auth/me", { onboarding_step: step });
       }
       queryClient.invalidateQueries({ queryKey: queryKeys.business });
       toast.success("Draft tersimpan", "Kamu bisa lanjut kapan saja.");

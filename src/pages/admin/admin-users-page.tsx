@@ -6,7 +6,7 @@ import { Table, type Column } from "@/components/ui/table";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { ROLE_LABELS } from "@/lib/constants";
 import { formatDateID, debounce } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -14,9 +14,9 @@ import { Input } from "@/components/ui/input";
 
 interface AdminUser {
   id: string;
-  full_name: string;
-  default_role: string;
-  created_at: string;
+  fullName: string;
+  defaultRole: string;
+  createdAt: string;
 }
 
 export default function AdminUsersPage() {
@@ -26,12 +26,13 @@ export default function AdminUsersPage() {
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["admin-users"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, default_role, created_at")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as AdminUser[];
+      const data = await api.get<Array<{
+        id: string;
+        fullName: string;
+        defaultRole: string;
+        createdAt: string;
+      }>>("/api/admin/users");
+      return data;
     },
   });
 
@@ -39,21 +40,21 @@ export default function AdminUsersPage() {
 
   const filtered = useMemo(() => {
     return users.filter((u) => {
-      if (roleFilter && u.default_role !== roleFilter) return false;
-      if (search) return (u.full_name ?? "").toLowerCase().includes(search.toLowerCase());
+      if (roleFilter && u.defaultRole !== roleFilter) return false;
+      if (search) return (u.fullName ?? "").toLowerCase().includes(search.toLowerCase());
       return true;
     });
   }, [users, search, roleFilter]);
 
   const columns: Column<AdminUser>[] = [
-    { key: "name", header: "Nama", cell: (u) => u.full_name || "Tanpa nama" },
+    { key: "name", header: "Nama", cell: (u) => u.fullName || "Tanpa nama" },
     {
       key: "role",
       header: "Role Default",
-      cell: (u) => <Badge tone="gray">{ROLE_LABELS[u.default_role as keyof typeof ROLE_LABELS] ?? u.default_role}</Badge>,
+      cell: (u) => <Badge tone="gray">{ROLE_LABELS[u.defaultRole as keyof typeof ROLE_LABELS] ?? u.defaultRole}</Badge>,
     },
     { key: "id", header: "User ID", hideOnMobile: true, cell: (u) => <code className="text-xs text-slate-500">{u.id.slice(0, 8)}</code> },
-    { key: "created", header: "Bergabung", hideOnMobile: true, cell: (u) => formatDateID(u.created_at) },
+    { key: "created", header: "Bergabung", hideOnMobile: true, cell: (u) => formatDateID(u.createdAt) },
   ];
 
   return (

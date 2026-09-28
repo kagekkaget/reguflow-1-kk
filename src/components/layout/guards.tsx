@@ -7,7 +7,7 @@
 
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { LoadingState } from "@/components/ui/loading";
 import type { MemberRole } from "@/types";
 

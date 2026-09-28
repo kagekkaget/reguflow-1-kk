@@ -8,12 +8,40 @@ import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { getSafeErrorMessage } from "@/lib/utils";
 import { DOMAIN_CODE_LABELS } from "@/lib/constants";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ComplianceRule } from "@/types";
 import { useState } from "react";
+
+type ApiRule = Omit<ComplianceRule,
+  "domain_id" | "condition_json" | "action_json" |
+  "is_active" | "effective_from" | "effective_until" | "created_at" | "updated_at"
+> & {
+  domainId: string | null;
+  conditionJson: Record<string, unknown>;
+  actionJson: Record<string, unknown>;
+  isActive: boolean;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function mapRule(r: ApiRule): ComplianceRule {
+  return {
+    ...r,
+    domain_id: r.domainId,
+    condition_json: r.conditionJson,
+    action_json: r.actionJson,
+    is_active: r.isActive,
+    effective_from: r.effectiveFrom,
+    effective_until: r.effectiveUntil,
+    created_at: r.createdAt,
+    updated_at: r.updatedAt,
+  };
+}
 
 export default function AdminRulesPage() {
   const toast = useToast();
@@ -31,12 +59,8 @@ export default function AdminRulesPage() {
   const { data: rules = [], isLoading } = useQuery({
     queryKey: ["admin-rules"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("compliance_rules")
-        .select("*")
-        .order("priority", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as ComplianceRule[];
+      const data = await api.get<ApiRule[]>("/api/rules");
+      return data.map(mapRule);
     },
   });
 
@@ -47,15 +71,9 @@ export default function AdminRulesPage() {
     }
     setSaving(true);
     try {
-      const { data: domain } = await supabase
-        .from("compliance_domains")
-        .select("id")
-        .eq("code", form.domainCode)
-        .maybeSingle();
-
-      const { error } = await supabase.from("compliance_rules").insert({
+      await api.post("/api/rules", {
         code: form.code,
-        domain_id: domain?.id ?? null,
+        domain_code: form.domainCode,
         title: form.title,
         description: form.description || null,
         priority: Number(form.priority) || 50,
@@ -63,7 +81,6 @@ export default function AdminRulesPage() {
         action_json: {},
         is_active: true,
       });
-      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["admin-rules"] });
       toast.success("Rule dibuat", form.title);
       setModalOpen(false);
@@ -77,11 +94,9 @@ export default function AdminRulesPage() {
 
   const handleToggle = async (rule: ComplianceRule) => {
     try {
-      const { error } = await supabase
-        .from("compliance_rules")
-        .update({ is_active: !rule.is_active })
-        .eq("id", rule.id);
-      if (error) throw error;
+      await api.patch(`/api/rules/${rule.id}`, {
+        is_active: !rule.is_active,
+      });
       queryClient.invalidateQueries({ queryKey: ["admin-rules"] });
       toast.success("Rule diperbarui", `${rule.title}: ${!rule.is_active ? "aktif" : "nonaktif"}`);
     } catch (error) {

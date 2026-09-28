@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input, Select } from "@/components/ui/input";
 import { ScoreCard } from "@/components/ui/score-card";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { assessmentSchema, type AssessmentInput } from "@/lib/validation";
 import { calculateComplianceScore } from "@/lib/compliance/scanner";
 import { getSafeErrorMessage } from "@/lib/utils";
@@ -65,7 +65,7 @@ export default function CekKesiapanPage() {
       });
 
       try {
-        await supabase.from("assessments").insert({
+        await api.post<{ id: string; score: number }>("/api/assessments", {
           business_name: answers.business_name,
           owner_name: answers.owner_name,
           whatsapp: answers.whatsapp,

@@ -4,7 +4,7 @@ import { Table, type Column } from "@/components/ui/table";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { formatDateID } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import type { Business } from "@/types";
@@ -13,12 +13,8 @@ export default function AdminBusinessesPage() {
   const { data: businesses = [], isLoading } = useQuery({
     queryKey: ["admin-businesses"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("id, legal_name, brand_name, nib, city, business_scale, status, created_at")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as Business[];
+      const data = await api.get<Business[]>("/api/admin/businesses");
+      return data;
     },
   });
 

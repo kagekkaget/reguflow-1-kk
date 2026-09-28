@@ -4,14 +4,41 @@ import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { queryKeys } from "@/hooks/use-queries";
 import { useQueryClient } from "@tanstack/react-query";
 import { ENGAGEMENT_STATUS_LABELS, ENGAGEMENT_STATUS_TONES } from "@/lib/constants";
 import { getSafeErrorMessage, formatDateID } from "@/lib/utils";
 import type { ConsultantEngagement } from "@/types";
 import { useQuery } from "@tanstack/react-query";
+
+type ApiEngagement = Omit<
+  ConsultantEngagement,
+  "business_organization_id" | "consultant_organization_id" | "business_organization" | "consultant_organization" | "created_at" | "updated_at" | "started_at" | "ended_at"
+> & {
+  businessOrganizationId: string;
+  consultantOrganizationId: string;
+  businessOrganizationName: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function mapEngagement(e: ApiEngagement): ConsultantEngagement {
+  return {
+    ...e,
+    business_organization_id: e.businessOrganizationId,
+    consultant_organization_id: e.consultantOrganizationId,
+    started_at: e.startedAt,
+    ended_at: e.endedAt,
+    created_at: e.createdAt,
+    updated_at: e.updatedAt,
+    business_organization: { id: e.businessOrganizationId, name: e.businessOrganizationName },
+    consultant_organization: { id: e.consultantOrganizationId, name: "Konsultan" },
+  };
+}
 
 export default function PendampingPage() {
   const toast = useToast();
@@ -22,15 +49,8 @@ export default function PendampingPage() {
     queryKey: queryKeys.engagements,
     enabled: Boolean(activeOrgId),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("consultant_engagements")
-        .select(
-          "*, business_organization:organizations!consultant_engagements_business_organization_id_fkey(id, name), consultant_organization:organizations!consultant_engagements_consultant_organization_id_fkey(id, name)"
-        )
-        .eq("business_organization_id", activeOrgId!)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as ConsultantEngagement[];
+      const data = await api.get<ApiEngagement[]>("/api/engagements");
+      return data.map(mapEngagement);
     },
   });
 
@@ -41,15 +61,12 @@ export default function PendampingPage() {
   const handleRequestConsultant = async () => {
     if (!activeOrgId) return;
     try {
-      // Buat request engagement dengan konsultan yang tersedia di platform.
-      // Untuk MVP: cari consultant_agency pertama yang aktif.
-      const { data: consultants } = await supabase
-        .from("organizations")
-        .select("id, name")
-        .eq("type", "consultant_agency")
-        .limit(1);
+      // Cari consultant_agency pertama yang terdaftar di platform.
+      const consultants = await api.get<{ id: string; name: string }[]>(
+        "/api/organizations/consultants"
+      );
 
-      const consultant = consultants?.[0];
+      const consultant = consultants[0];
       if (!consultant) {
         toast.info(
           "Belum ada konsultan",
@@ -58,17 +75,13 @@ export default function PendampingPage() {
         return;
       }
 
-      const { error } = await supabase
-        .from("consultant_engagements")
-        .insert({
-          business_organization_id: activeOrgId,
-          consultant_organization_id: consultant.id,
-          package_name: "Pendampingan Compliance Dasar",
-          scope: "Asesmen kesiapan, review checklist, dan pendampingan dokumen",
-          status: "pending",
-        });
+      await api.post("/api/engagements", {
+        business_organization_id: activeOrgId,
+        consultant_organization_id: consultant.id,
+        package_name: "Pendampingan Compliance Dasar",
+        scope: "Asesmen kesiapan, review checklist, dan pendampingan dokumen",
+      });
 
-      if (error) throw error;
       queryClient.invalidateQueries({ queryKey: queryKeys.engagements });
       toast.success(
         "Permintaan terkirim",

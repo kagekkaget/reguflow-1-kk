@@ -4,7 +4,7 @@ import { Table, type Column } from "@/components/ui/table";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { DOMAIN_CODE_LABELS } from "@/lib/constants";
 import { useQuery } from "@tanstack/react-query";
 import type { Requirement } from "@/types";
@@ -13,13 +13,8 @@ export default function AdminTemplatesPage() {
   const { data: requirements = [], isLoading } = useQuery({
     queryKey: ["admin-requirements"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("requirements")
-        .select("*")
-        .order("domain_code", { ascending: true })
-        .order("sort_order", { ascending: true });
-      if (error) throw error;
-      return (data ?? []) as Requirement[];
+      const data = await api.get<Requirement[]>("/api/compliance/requirements");
+      return data;
     },
   });
 
@@ -58,7 +53,7 @@ export default function AdminTemplatesPage() {
         <CardBody>
           <p className="text-sm text-slate-700">
             Template awal untuk halal, NIB, SPP-IRT, labeling, dan dokumen usaha
-            sudah disediakan melalui <code>supabase/seed.sql</code>. Jalankan ulang
+            sudah disediakan melalui seed SQL di <code>server/src/db/seed.ts</code>. Jalankan ulang
             seed jika ingin reset template.
           </p>
         </CardBody>

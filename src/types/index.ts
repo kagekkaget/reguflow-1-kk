@@ -377,7 +377,6 @@ export type StatusTone = "gray" | "red" | "amber" | "yellow" | "green" | "blue";
 // ---- Auth context --------------------------------------------------------
 
 export interface AuthContextValue {
-  session: import("@supabase/supabase-js").Session | null;
   profile: Profile | null;
   memberships: (OrganizationMember & { organization: Organization })[];
   activeOrganization: Organization | null;

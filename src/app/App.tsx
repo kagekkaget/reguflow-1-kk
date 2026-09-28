@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { AppRouter } from "@/app/router";
 import { Toaster } from "@/components/ui/toast";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { useAuthStore } from "@/lib/api/auth-store";
 
 export default function App() {
   const init = useAuthStore((s) => s.init);

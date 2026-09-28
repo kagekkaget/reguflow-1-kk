@@ -1,23 +1,20 @@
 // ============================================================================
-// ReguFlow - Document vault hook (upload via private bucket + signed URL)
+// ReguFlow - Document vault hook (REST API multipart + private download)
 // ----------------------------------------------------------------------------
 // Keamanan:
-// - File divalidasi (tipe, ukuran, nama) sebelum upload.
-// - Upload ke path documents/<org_id>/<doc_id>/<filename> (di-guard RLS storage).
-// - Preview/download HANYA melalui signed URL, tidak ada public URL.
-// - Setiap aksi dicatat di audit_logs.
+// - File divalidasi (tipe, ukuran, nama) di client SEBELUM upload, dan
+//   divalidasi lagi di server (defense in depth).
+// - Upload via multipart ke /api/documents; file disimpan di storage private.
+// - Preview/download via endpoint /api/documents/:id/download yang memeriksa
+//   ownership di server. Tidak ada public URL.
+// - Setiap aksi dicatat di audit_logs oleh server.
 // ============================================================================
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase, DOCUMENTS_BUCKET } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api, API_URL, getAccessToken } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { queryKeys, useDocuments } from "@/hooks/use-queries";
-import {
-  buildDocumentStoragePath,
-  sanitizeFileName,
-  validateUploadedFile,
-} from "@/lib/security";
-import { logAudit } from "@/lib/security/audit";
+import { validateUploadedFile, sanitizeFileName } from "@/lib/security";
 import { getSafeErrorMessage } from "@/lib/utils";
 import type { DocumentRow, DocumentStatus } from "@/types";
 
@@ -32,86 +29,77 @@ export interface UploadDocumentInput {
   notes?: string | null;
 }
 
+type ApiDocument = Parameters<typeof mapToDocumentRow>[0];
+
+// Mapper camelCase → snake_case (lihat use-queries.ts untuk pola yang sama).
+function mapToDocumentRow(d: {
+  id: string;
+  organizationId: string;
+  businessId: string | null;
+  productId: string | null;
+  uploadedBy: string | null;
+  documentType: string;
+  title: string;
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  issueDate: string | null;
+  expiryDate: string | null;
+  verificationStatus: DocumentStatus;
+  notes: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}): DocumentRow {
+  return {
+    id: d.id,
+    organization_id: d.organizationId,
+    business_id: d.businessId,
+    product_id: d.productId,
+    uploaded_by: d.uploadedBy,
+    document_type: d.documentType,
+    title: d.title,
+    file_path: d.filePath,
+    file_name: d.fileName,
+    mime_type: d.mimeType,
+    file_size: d.fileSize,
+    issue_date: d.issueDate,
+    expiry_date: d.expiryDate,
+    verification_status: d.verificationStatus,
+    notes: d.notes,
+    deleted_at: d.deletedAt,
+    created_at: d.createdAt,
+    updated_at: d.updatedAt,
+  };
+}
+
 export function useDocumentVault() {
   const queryClient = useQueryClient();
   const orgId = useAuthStore((s) => s.activeOrganizationId);
-  const userId = useAuthStore((s) => s.profile?.id ?? null);
   const { data: documents = [] } = useDocuments();
 
   const uploadDocument = useMutation({
     mutationFn: async (input: UploadDocumentInput): Promise<DocumentRow> => {
       if (!orgId) throw new Error("Organisasi tidak ditemukan. Coba login ulang.");
-      if (!userId) throw new Error("Sesi tidak valid. Coba login ulang.");
 
       const validation = validateUploadedFile(input.file);
       if (!validation.ok) {
         throw new Error(validation.error ?? "Jenis file tidak didukung.");
       }
 
-      // 1. Buat metadata dokumen lebih dulu untuk dapat document_id
-      const docId = crypto.randomUUID();
-      const safeName = sanitizeFileName(input.file.name);
-      const filePath = buildDocumentStoragePath(orgId, docId, safeName);
+      const formData = new FormData();
+      formData.append("file", input.file, sanitizeFileName(input.file.name));
+      formData.append("document_type", input.documentType);
+      formData.append("title", input.title);
+      if (input.businessId) formData.append("business_id", input.businessId);
+      if (input.productId) formData.append("product_id", input.productId);
+      if (input.issueDate) formData.append("issue_date", input.issueDate);
+      if (input.expiryDate) formData.append("expiry_date", input.expiryDate);
+      if (input.notes) formData.append("notes", input.notes);
 
-      // 2. Upload file ke private bucket
-      const { error: uploadError } = await supabase.storage
-        .from(DOCUMENTS_BUCKET)
-        .upload(filePath, input.file, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: input.file.type || undefined,
-        });
-
-      if (uploadError) {
-        throw new Error(
-          uploadError.message?.includes("already")
-            ? "File dengan nama tersebut sudah ada."
-            : "Gagal mengunggah file. Coba lagi."
-        );
-      }
-
-      // 3. Simpan metadata
-      const { data, error } = await supabase
-        .from("documents")
-        .insert({
-          id: docId,
-          organization_id: orgId,
-          business_id: input.businessId ?? null,
-          product_id: input.productId ?? null,
-          uploaded_by: userId,
-          document_type: input.documentType,
-          title: input.title,
-          file_path: filePath,
-          file_name: safeName,
-          mime_type: input.file.type || "application/octet-stream",
-          file_size: input.file.size,
-          issue_date: input.issueDate || null,
-          expiry_date: input.expiryDate || null,
-          verification_status: "pending",
-          notes: input.notes ?? null,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        // rollback file jika metadata gagal
-        await supabase.storage.from(DOCUMENTS_BUCKET).remove([filePath]);
-        throw new Error("Gagal menyimpan metadata dokumen.");
-      }
-
-      await logAudit({
-        organizationId: orgId,
-        action: "document_uploaded",
-        entityType: "document",
-        entityId: docId,
-        metadata: {
-          document_type: input.documentType,
-          file_name: safeName,
-          file_size: input.file.size,
-        },
-      });
-
-      return data as DocumentRow;
+      const data = await api.post<ApiDocument>("/api/documents", formData);
+      return mapToDocumentRow(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
@@ -127,26 +115,39 @@ export function useDocumentVault() {
       action?: "preview" | "download";
     }): Promise<string> => {
       if (!orgId) throw new Error("Organisasi tidak ditemukan.");
-      const { data, error } = await supabase.storage
-        .from(DOCUMENTS_BUCKET)
-        .createSignedUrl(doc.file_path, 60, {
-          download: action === "download" ? doc.file_name : false,
-        });
+      // Server memeriksa ownership sebelum mengirim file. Karena fetch dengan
+      // credentials diperlukan, kita unduh sebagai blob lalu buat object URL.
+      const response = await fetch(
+        `${API_URL}/api/documents/${doc.id}/download`,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: getAccessToken()
+            ? { Authorization: `Bearer ${getAccessToken()}` }
+            : undefined,
+        }
+      );
 
-      if (error || !data?.signedUrl) {
-        throw new Error("Gagal membuat tautan aman untuk dokumen.");
+      if (!response.ok) {
+        throw new Error("Gagal mengakses dokumen. Coba lagi.");
       }
 
-      await logAudit({
-        organizationId: orgId,
-        action:
-          action === "download" ? "document_downloaded" : "document_viewed",
-        entityType: "document",
-        entityId: doc.id,
-        metadata: { file_name: doc.file_name },
-      });
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
 
-      return data.signedUrl;
+      // Untuk action download, picu unduhan otomatis lalu revoke object URL.
+      if (action === "download") {
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = doc.file_name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        return objectUrl;
+      }
+
+      return objectUrl;
     },
   });
 
@@ -162,14 +163,11 @@ export function useDocumentVault() {
       notes?: string | null;
       expiryDate?: string | null;
     }): Promise<void> => {
-      const update: Record<string, unknown> = { verification_status: status };
-      if (notes !== undefined) update.notes = notes;
-      if (expiryDate !== undefined) update.expiry_date = expiryDate;
-      const { error } = await supabase
-        .from("documents")
-        .update(update)
-        .eq("id", docId);
-      if (error) throw new Error("Gagal memperbarui status dokumen.");
+      await api.patch(`/api/documents/${docId}`, {
+        verification_status: status,
+        notes: notes ?? undefined,
+        expiry_date: expiryDate ?? undefined,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });
@@ -179,22 +177,7 @@ export function useDocumentVault() {
   const deleteDocument = useMutation({
     mutationFn: async (doc: DocumentRow): Promise<void> => {
       if (!orgId) throw new Error("Organisasi tidak ditemukan.");
-      // Soft-delete metadata dulu, lalu hapus file storage
-      const { error: metaError } = await supabase
-        .from("documents")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", doc.id);
-      if (metaError) throw new Error("Gagal menghapus dokumen.");
-
-      await supabase.storage.from(DOCUMENTS_BUCKET).remove([doc.file_path]);
-
-      await logAudit({
-        organizationId: orgId,
-        action: "document_deleted",
-        entityType: "document",
-        entityId: doc.id,
-        metadata: { file_name: doc.file_name },
-      });
+      await api.delete(`/api/documents/${doc.id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.documents });

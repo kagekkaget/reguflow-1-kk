@@ -4,7 +4,7 @@ import { Table, type Column } from "@/components/ui/table";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import {
   DOCUMENT_STATUS_LABELS,
   DOCUMENT_STATUS_TONES,
@@ -14,17 +14,54 @@ import { formatBytes, formatDateID } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import type { DocumentRow } from "@/types";
 
+type ApiDocument = Omit<DocumentRow,
+  "organization_id" | "business_id" | "product_id" | "uploaded_by" |
+  "file_path" | "file_name" | "mime_type" | "file_size" |
+  "issue_date" | "expiry_date" | "verification_status" |
+  "deleted_at" | "created_at" | "updated_at"
+> & {
+  organizationId: string;
+  businessId: string | null;
+  productId: string | null;
+  uploadedBy: string | null;
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  issueDate: string | null;
+  expiryDate: string | null;
+  verificationStatus: DocumentRow["verification_status"];
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function mapDocument(d: ApiDocument): DocumentRow {
+  return {
+    ...d,
+    organization_id: d.organizationId,
+    business_id: d.businessId,
+    product_id: d.productId,
+    uploaded_by: d.uploadedBy,
+    file_path: d.filePath,
+    file_name: d.fileName,
+    mime_type: d.mimeType,
+    file_size: d.fileSize,
+    issue_date: d.issueDate,
+    expiry_date: d.expiryDate,
+    verification_status: d.verificationStatus,
+    deleted_at: d.deletedAt,
+    created_at: d.createdAt,
+    updated_at: d.updatedAt,
+  };
+}
+
 export default function AdminDocumentsPage() {
   const { data: documents = [], isLoading } = useQuery({
     queryKey: ["admin-documents"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("documents")
-        .select("*")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as DocumentRow[];
+      const data = await api.get<ApiDocument[]>("/api/admin/documents");
+      return data.map(mapDocument);
     },
   });
 

@@ -2,7 +2,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { useQuery } from "@tanstack/react-query";
 import { formatDateID } from "@/lib/utils";
 
@@ -10,38 +10,33 @@ export default function AdminReportsPage() {
   const { data: assessments = [], isLoading } = useQuery({
     queryKey: ["admin-assessments"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("assessments")
-        .select("id, business_name, city, score, created_at")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return (data ?? []) as Array<{
+      const data = await api.get<Array<{
         id: string;
-        business_name: string;
+        businessName: string;
         city: string;
         score: number;
-        created_at: string;
-      }>;
+        createdAt: string;
+      }>>("/api/assessments");
+      return data;
     },
   });
 
   const { data: audits = [] } = useQuery({
     queryKey: ["admin-audits"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("audit_logs")
-        .select("id, action, actor_id, created_at, metadata")
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return (data ?? []) as Array<{
+      const data = await api.get<Array<{
         id: string;
+        organizationId: string | null;
+        actorId: string | null;
         action: string;
-        actor_id: string | null;
-        created_at: string;
+        entityType: string | null;
+        entityId: string | null;
         metadata: Record<string, unknown>;
-      }>;
+        ipAddress: string | null;
+        userAgent: string | null;
+        createdAt: string;
+      }>>("/api/admin/audit-logs");
+      return data;
     },
   });
 
@@ -97,10 +92,10 @@ export default function AdminReportsPage() {
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-slate-900">
-                      {a.business_name}
+                      {a.businessName}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {a.city} · {formatDateID(a.created_at)}
+                      {a.city} · {formatDateID(a.createdAt)}
                     </p>
                   </div>
                   <span className="flex-shrink-0 text-sm font-bold text-slate-900">
@@ -130,8 +125,8 @@ export default function AdminReportsPage() {
                       {a.action.replace(/_/g, " ")}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {a.actor_id ? `User: ${a.actor_id.slice(0, 8)}` : "Sistem"} ·{" "}
-                      {formatDateID(a.created_at, {
+                      {a.actorId ? `User: ${a.actorId.slice(0, 8)}` : "Sistem"} ·{" "}
+                      {formatDateID(a.createdAt, {
                         day: "numeric",
                         month: "short",
                         hour: "2-digit",

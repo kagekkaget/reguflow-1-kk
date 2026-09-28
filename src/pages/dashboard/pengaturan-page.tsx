@@ -9,12 +9,11 @@ import { Field, Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/layout/page-header";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { profileSchema, type ProfileFormInput } from "@/lib/validation";
 import { ROLE_LABELS, ROLE_DESCRIPTIONS } from "@/lib/constants";
 import { getSafeErrorMessage, getInitials } from "@/lib/utils";
-import { logAudit } from "@/lib/security/audit";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function PengaturanPage() {
@@ -22,7 +21,7 @@ export default function PengaturanPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const profile = useAuthStore((s) => s.profile);
-  const sessionEmail = useAuthStore((s) => s.session?.user?.email ?? "");
+  const sessionEmail = useAuthStore((s) => s.email ?? "");
   const memberships = useAuthStore((s) => s.memberships);
   const activeRole = useAuthStore((s) => s.activeRole());
   const activeOrganization = useAuthStore((s) => s.activeOrganization());
@@ -48,19 +47,9 @@ export default function PengaturanPage() {
     if (!profile) return;
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          full_name: values.full_name,
-          phone: values.phone || null,
-        })
-        .eq("id", profile.id);
-      if (error) throw error;
-      await logAudit({
-        organizationId: activeOrganization?.id,
-        action: "profile_updated",
-        entityType: "profile",
-        entityId: profile.id,
+      await api.patch("/api/auth/me", {
+        full_name: values.full_name,
+        phone: values.phone || null,
       });
       await refresh();
       queryClient.invalidateQueries();
@@ -120,7 +109,7 @@ export default function PengaturanPage() {
                 </Field>
                 <Field
                   label="Email"
-                  hint="Email diatur melalui Supabase Auth"
+                  hint="Email diatur saat pendaftaran"
                 >
                   <Input
                     value={sessionEmail}
@@ -218,7 +207,7 @@ export default function PengaturanPage() {
                   >
                     <path strokeLinecap="round" d="M4.5 12.75l6 6 9-13.5" />
                   </svg>
-                  Autentikasi via Supabase Auth
+                  Autentikasi aman (bcrypt + JWT httpOnly)
                 </li>
                 <li className="flex gap-2.5">
                   <svg

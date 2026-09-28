@@ -6,8 +6,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import {
   CASE_STATUS_LABELS,
   CASE_STATUS_TONES,
@@ -15,14 +15,48 @@ import {
   ENGAGEMENT_STATUS_TONES,
 } from "@/lib/constants";
 import { getSafeErrorMessage, formatDateID } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CaseStatus, ConsultantEngagement } from "@/types";
+
+type ApiEngagement = {
+  id: string;
+  businessOrganizationId: string;
+  consultantOrganizationId: string;
+  packageName: string | null;
+  scope: string | null;
+  status: ConsultantEngagement["status"];
+  price: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  businessOrganizationName: string;
+};
+
+function mapEngagement(e: ApiEngagement): ConsultantEngagement {
+  return {
+    id: e.id,
+    business_organization_id: e.businessOrganizationId,
+    consultant_organization_id: e.consultantOrganizationId,
+    package_name: e.packageName,
+    scope: e.scope,
+    status: e.status,
+    price: e.price,
+    started_at: e.startedAt,
+    ended_at: e.endedAt,
+    created_at: e.createdAt,
+    updated_at: e.updatedAt,
+    business_organization: { id: e.businessOrganizationId, name: e.businessOrganizationName },
+    consultant_organization: null,
+  };
+}
 
 export default function ConsultantDashboardPage() {
   const toast = useToast();
   const activeOrgId = useAuthStore((s) => s.activeOrganizationId);
   const activeRole = useAuthStore((s) => s.activeRole());
   const isPlatformAdmin = useAuthStore((s) => s.isPlatformAdmin());
+  const queryClient = useQueryClient();
 
   const {
     data: engagements = [],
@@ -32,17 +66,11 @@ export default function ConsultantDashboardPage() {
     enabled: Boolean(activeOrgId),
     queryFn: async () => {
       // Admin platform melihat semua engagement; konsultan melihat milik org-nya
-      const baseQuery = supabase
-        .from("consultant_engagements")
-        .select(
-          "*, business_organization:organizations!consultant_engagements_business_organization_id_fkey(id, name)"
-        );
-      const query = !isPlatformAdmin && activeRole === "consultant"
-        ? baseQuery.eq("consultant_organization_id", activeOrgId!)
-        : baseQuery;
-      const { data, error } = await query.order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as ConsultantEngagement[];
+      const data = await api.get<ApiEngagement[]>("/api/engagements");
+      const filtered = (!isPlatformAdmin && activeRole === "consultant")
+        ? data.filter((e) => e.consultantOrganizationId === activeOrgId)
+        : data;
+      return filtered.map(mapEngagement);
     },
   });
 
@@ -54,24 +82,13 @@ export default function ConsultantDashboardPage() {
     queryKey: ["consultant-cases", activeOrgId],
     enabled: engagements.length > 0,
     queryFn: async () => {
-      const orgIds = engagements.map((e) => e.business_organization_id);
-      const { data: businesses } = await supabase
-        .from("businesses")
-        .select("id")
-        .in("organization_id", orgIds);
-      if (!businesses || businesses.length === 0) return [];
-      const { data, error } = await supabase
-        .from("compliance_cases")
-        .select(
-          "*, business:businesses!compliance_cases_business_id_fkey(id, legal_name, brand_name, organization_id)"
-        )
-        .in(
-          "business_id",
-          businesses.map((b) => b.id)
-        )
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as Array<{
+      const orgIds = engagements
+        .filter((e) => e.business_organization_id)
+        .map((e) => e.business_organization_id);
+      if (orgIds.length === 0) return [];
+
+      // Fetch compliance cases for each client business org
+      const cases: Array<{
         id: string;
         title: string;
         domain_code: string;
@@ -79,7 +96,36 @@ export default function ConsultantDashboardPage() {
         score: number;
         business: { id: string; legal_name: string; organization_id: string } | null;
         updated_at: string;
-      }>;
+      }> = [];
+
+      for (const orgId of orgIds) {
+        const data = await api.get<{
+          id: string;
+          businessId: string;
+          productId: string | null;
+          domainCode: string;
+          pathway: string | null;
+          title: string;
+          status: CaseStatus;
+          score: number;
+          dueDate: string | null;
+          assignedConsultantId: string | null;
+          createdAt: string;
+          updatedAt: string;
+          productName: string | null;
+        }[]>(`/api/organizations/${orgId}/compliance-cases`);
+        cases.push(...data.map((c) => ({
+          id: c.id,
+          title: c.title,
+          domain_code: c.domainCode,
+          status: c.status,
+          score: c.score,
+          business: { id: c.businessId, legal_name: c.title, organization_id: orgId },
+          updated_at: c.updatedAt,
+        })));
+      }
+
+      return cases;
     },
   });
 
@@ -94,11 +140,8 @@ export default function ConsultantDashboardPage() {
     status: ConsultantEngagement["status"]
   ) => {
     try {
-      const { error } = await supabase
-        .from("consultant_engagements")
-        .update({ status })
-        .eq("id", id);
-      if (error) throw error;
+      await api.patch(`/api/engagements/${id}`, { status });
+      queryClient.invalidateQueries({ queryKey: ["consultant-engagements", activeOrgId] });
       toast.success("Status diperbarui", ENGAGEMENT_STATUS_LABELS[status]);
     } catch (error) {
       toast.error("Gagal memperbarui", getSafeErrorMessage(error));

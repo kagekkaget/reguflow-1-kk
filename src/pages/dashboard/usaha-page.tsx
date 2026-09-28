@@ -17,9 +17,8 @@ import {
   PROVINSI_LIST,
 } from "@/lib/constants";
 import { getSafeErrorMessage } from "@/lib/utils";
-import { logAudit } from "@/lib/security/audit";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { useBusiness } from "@/hooks/use-queries";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/hooks/use-queries";
@@ -90,20 +89,9 @@ export default function UsahaPage() {
       };
 
       if (business) {
-        const { error } = await supabase
-          .from("businesses")
-          .update(payload)
-          .eq("id", business.id);
-        if (error) throw error;
-        await logAudit({
-          organizationId: activeOrgId,
-          action: "business_updated",
-          entityType: "business",
-          entityId: business.id,
-        });
+        await api.put(`/api/businesses/${business.id}`, payload);
       } else {
-        const { error } = await supabase.from("businesses").insert(payload);
-        if (error) throw error;
+        await api.post("/api/businesses", payload);
       }
 
       queryClient.invalidateQueries({ queryKey: queryKeys.business });

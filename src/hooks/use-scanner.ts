@@ -2,18 +2,31 @@
 // ReguFlow - Compliance scanner hook
 // ----------------------------------------------------------------------------
 // Menggabungkan data usaha, produk, dokumen, lalu menjalankan scanner engine.
-// Juga menyediakan mutasi untuk membuat compliance case & checklist otomatis.
+// Membuat compliance case & checklist otomatis via API (server yang membuat
+// checklist dari requirements domain).
 // ============================================================================
 
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/lib/supabase/client";
-import { useAuthStore } from "@/lib/supabase/auth-store";
-import { useBusiness, useDocuments, useProducts, queryKeys } from "@/hooks/use-queries";
+import { api } from "@/lib/api/client";
+import { useAuthStore } from "@/lib/api/auth-store";
+import {
+  useBusiness,
+  useDocuments,
+  useProducts,
+  queryKeys,
+} from "@/hooks/use-queries";
 import { calculateComplianceScore } from "@/lib/compliance/scanner";
 import { DOMAIN_CODE_LABELS } from "@/lib/constants";
-import { logAudit } from "@/lib/security/audit";
 import type { ScannerInput, ScannerResult } from "@/types";
+
+interface ApiCase {
+  id: string;
+  businessId: string;
+  domainCode: string;
+  title: string;
+  status: string;
+}
 
 export function useComplianceScanner(): {
   result: ScannerResult | null;
@@ -44,64 +57,23 @@ export function useComplianceScanner(): {
       return null;
     }
     const business = businesses[0]!;
-    const existing = result.suggestedCases;
+    const existingCases = await api.get<ApiCase[]>(
+      `/api/compliance/cases?business_id=${encodeURIComponent(business.id)}`
+    );
+    const existingDomains = new Set(existingCases.map((c) => c.domainCode));
 
-    for (const domainCode of existing) {
-      // cek apakah case sudah ada
-      const { data: found } = await supabase
-        .from("compliance_cases")
-        .select("id")
-        .eq("business_id", business.id)
-        .eq("domain_code", domainCode)
-        .maybeSingle();
+    for (const domainCode of result.suggestedCases) {
+      if (existingDomains.has(domainCode)) continue;
 
-      if (found) continue;
-
-      const { data: created, error } = await supabase
-        .from("compliance_cases")
-        .insert({
-          business_id: business.id,
-          domain_code: domainCode,
-          title: `${DOMAIN_CODE_LABELS[domainCode] ?? domainCode} — ${business.legal_name}`,
-          status: "not_started",
-          score: 0,
-        })
-        .select()
-        .single();
-
-      if (error) continue;
-
-      // buat checklist awal dari result + requirements default
-      const { data: requirements } = await supabase
-        .from("requirements")
-        .select("name, description, sort_order, is_mandatory")
-        .eq("domain_code", domainCode)
-        .order("sort_order", { ascending: true });
-
-      const items = (requirements ?? []).map((r, idx) => ({
-        compliance_case_id: (created as { id: string }).id,
-        requirement_id: null,
-        title: r.name,
-        description: r.description,
-        status: "todo" as const,
-        sort_order: r.sort_order ?? idx,
-      }));
-
-      if (items.length > 0) {
-        await supabase.from("checklist_items").insert(items);
-      }
+      await api.post<ApiCase>("/api/compliance/cases", {
+        business_id: business.id,
+        domain_code: domainCode,
+        title: `${DOMAIN_CODE_LABELS[domainCode] ?? domainCode} — ${business.legal_name}`,
+      });
+      // Server membuat checklist otomatis dari requirements domain.
     }
 
-    await logAudit({
-      organizationId: orgId,
-      action: "scanner_run",
-      entityType: "business",
-      entityId: business.id,
-      metadata: { score: result.score, cases: existing },
-    });
-
     queryClient.invalidateQueries({ queryKey: queryKeys.complianceCases });
-    queryClient.invalidateQueries({ queryKey: queryKeys.business });
 
     return result;
   };

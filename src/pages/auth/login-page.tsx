@@ -5,17 +5,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { supabase } from "@/lib/supabase/client";
 import { loginSchema, type LoginInput } from "@/lib/validation";
 import { getSafeErrorMessage } from "@/lib/utils";
-import { logAudit } from "@/lib/security/audit";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { useAuthStore } from "@/lib/api/auth-store";
 
 export default function LoginPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const refresh = useAuthStore((s) => s.refresh);
+  const signIn = useAuthStore((s) => s.signIn);
   const [loading, setLoading] = useState(false);
 
   const {
@@ -29,18 +27,8 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginInput) => {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: data.email,
-        password: data.password,
-      });
+      await signIn(data.email, data.password);
 
-      if (error) {
-        toast.error("Login gagal", "Email atau password salah. Coba lagi.");
-        return;
-      }
-
-      await logAudit({ action: "user_login" });
-      await refresh();
       toast.success("Berhasil masuk", "Selamat datang kembali!");
 
       const from = (location.state as { from?: string } | null)?.from;

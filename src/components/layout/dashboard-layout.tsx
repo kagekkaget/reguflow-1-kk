@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { useAuthStore } from "@/lib/api/auth-store";
 import { ROLE_LABELS } from "@/lib/constants";
 import { getInitials } from "@/lib/utils";
 import type { NavItem } from "@/lib/constants/navigation";

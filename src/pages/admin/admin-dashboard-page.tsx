@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingState } from "@/components/ui/loading";
-import { supabase } from "@/lib/supabase/client";
+import { api } from "@/lib/api/client";
 import { useQuery } from "@tanstack/react-query";
 import { formatDateID } from "@/lib/utils";
 
@@ -11,57 +11,30 @@ export default function AdminDashboardPage() {
   const { data: stats, isLoading } = useQuery({
     queryKey: ["admin-stats"],
     queryFn: async () => {
-      const [
-        { count: totalUsers },
-        { count: totalProfiles },
-        { count: totalBusinesses },
-        { count: totalProducts },
-        { count: totalDocuments },
-        { count: activeCases },
-        { count: thisMonthAssessments },
-      ] = await Promise.all([
-        supabase.from("organization_members").select("*", { count: "exact", head: true }),
-        supabase.from("profiles").select("*", { count: "exact", head: true }),
-        supabase.from("businesses").select("*", { count: "exact", head: true }),
-        supabase.from("products").select("*", { count: "exact", head: true }),
-        supabase.from("documents").select("*", { count: "exact", head: true }).is("deleted_at", null),
-        supabase
-          .from("compliance_cases")
-          .select("*", { count: "exact", head: true })
-          .not("status", "in", '("approved","expired")'),
-        supabase
-          .from("assessments")
-          .select("*", { count: "exact", head: true })
-          .gte("created_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
-      ]);
-
-      return {
-        totalUsers: totalUsers ?? 0,
-        totalProfiles: totalProfiles ?? 0,
-        totalBusinesses: totalBusinesses ?? 0,
-        totalProducts: totalProducts ?? 0,
-        totalDocuments: totalDocuments ?? 0,
-        activeCases: activeCases ?? 0,
-        thisMonthAssessments: thisMonthAssessments ?? 0,
-      };
+      const stats = await api.get<{
+        totalUsers: number;
+        totalMembers: number;
+        totalBusinesses: number;
+        totalProducts: number;
+        totalDocuments: number;
+        activeCases: number;
+        thisMonthAssessments: number;
+      }>("/api/admin/stats");
+      return stats;
     },
   });
 
   const { data: recentUsers = [] } = useQuery({
     queryKey: ["admin-recent-users"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, default_role, created_at")
-        .order("created_at", { ascending: false })
-        .limit(5);
-      if (error) throw error;
-      return (data ?? []) as Array<{
+      const data = await api.get<Array<{
         id: string;
-        full_name: string;
-        default_role: string;
-        created_at: string;
-      }>;
+        fullName: string;
+        email: string;
+        defaultRole: string;
+        createdAt: string;
+      }>>("/api/admin/users");
+      return data;
     },
   });
 
@@ -75,8 +48,8 @@ export default function AdminDashboardPage() {
   }
 
   const cards = [
-    { label: "Total Pengguna", value: stats?.totalProfiles ?? 0, hint: "User terdaftar" },
-    { label: "Total Anggota Org", value: stats?.totalUsers ?? 0, hint: "Membership aktif" },
+    { label: "Total Pengguna", value: stats?.totalUsers ?? 0, hint: "User terdaftar" },
+    { label: "Total Anggota Org", value: stats?.totalMembers ?? 0, hint: "Membership aktif" },
     { label: "Total UMKM", value: stats?.totalBusinesses ?? 0, hint: "Profil usaha" },
     { label: "Total Produk", value: stats?.totalProducts ?? 0 },
     {
@@ -127,13 +100,13 @@ export default function AdminDashboardPage() {
                 >
                   <div>
                     <p className="text-sm font-medium text-slate-900">
-                      {u.full_name || "Tanpa nama"}
+                      {u.fullName || "Tanpa nama"}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {formatDateID(u.created_at)}
+                      {formatDateID(u.createdAt)}
                     </p>
                   </div>
-                  <Badge tone="gray">{u.default_role}</Badge>
+                  <Badge tone="gray">{u.defaultRole}</Badge>
                 </li>
               ))}
             </ul>

@@ -14,7 +14,7 @@ import {
   useTasks,
 } from "@/hooks/use-queries";
 import { useComplianceScanner } from "@/hooks/use-scanner";
-import { useAuthStore } from "@/lib/supabase/auth-store";
+import { useAuthStore } from "@/lib/api/auth-store";
 import {
   CASE_STATUS_LABELS,
   CASE_STATUS_TONES,
