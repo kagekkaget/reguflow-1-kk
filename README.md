@@ -15,367 +15,375 @@ resmi ke OSS, SIHALAL, BPOM, DJP, atau portal lainnya. Keputusan akhir dan
 pengajuan resmi tetap dilakukan melalui portal resmi pemerintah atau
 pendamping/konsultan terkait.
 
+ReguFlow **gratis, tanpa iklan, dan source code-nya terbuka** (MIT). Lihat
+bagian [Dukungan & Sumber Terbuka](#dukungan--sumber-terbuka).
+
 ---
 
 ## Tech Stack
 
-**Frontend**
-- React 18 + TypeScript
-- Vite 6 (build cepat, code splitting otomatis via lazy loading)
-- Tailwind CSS 3 (mobile-first, custom theme)
-- React Router 6 (protected routes + role-based guards)
-- React Hook Form + Zod (validasi form dengan pesan Bahasa Indonesia)
-- TanStack Query 5 (caching & invalidation data)
-- Zustand (state ringan: auth store)
+**Frontend** (`/` — Vite + React)
+- React 18 + TypeScript (strict mode)
+- Vite 6 (code splitting otomatis + manual chunks untuk vendor)
+- Tailwind CSS 3 (mobile-first, custom theme `brand`)
+- React Router 7 (protected routes + role-based guards)
+- TanStack Query 5 (caching & invalidation, `staleTime` 30s)
+- React Hook Form + Zod (validasi dengan pesan Bahasa Indonesia)
+- Zustand 5 (auth store + toast store)
+- `qrcode` (MIT) — QR dibuat **lokal** sebagai SVG, tanpa CDN
 
-**Backend / Database**
-- Supabase (Auth, PostgreSQL, Storage, Row Level Security)
-- Tidak ada backend custom untuk MVP — semua akses data melalui RLS Supabase
-- Storage bucket dokumen **private**, akses file via **signed URL**
+**Backend** (`/server` — API khusus)
+- Node.js + Express 5 + TypeScript
+- Drizzle ORM + **Neon** (PostgreSQL serverless, via `@neondatabase/serverless`)
+- JWT access token (short-lived, 15 menit) + refresh token di **httpOnly cookie**
+  (refresh token disimpan di tabel `refresh_tokens` sehingga bisa dicabut)
+- `bcryptjs` (hash password) + `zod` (validasi input di server)
+- `helmet` + `express-rate-limit` (100 request / 15 menit / IP)
+- `multer` — dokumen diunggah ke folder **private** (`UPLOAD_DIR`) dan disajikan
+  lewat endpoint terautentikasi, bukan URL publik
 
----
-
-## Cara Install
-
-### 1. Clone & install dependencies
-
-```bash
-git clone <repo-url>
-cd reguflow
-npm install
-```
-
-### 2. Setup environment variables
-
-Salin `.env.example` menjadi `.env` dan isi dengan kredensial Supabase kamu:
-
-```bash
-cp .env.example .env
-```
-
-```env
-VITE_SUPABASE_URL=https://xxxxxxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6...
-```
-
-Dapatkan nilai ini di **Supabase Dashboard → Settings → API**.
-
-> ⚠️ **JANGAN** pernah memasukkan `SUPABASE_SERVICE_ROLE_KEY` ke frontend atau
-> file `.env` frontend. Service role key hanya untuk server/admin scripts.
-
-### 3. Setup database Supabase
-
-Buka **Supabase Dashboard → SQL Editor** dan jalankan file-file SQL berikut
-**secara berurutan**:
-
-```bash
-# 1. Schema (tabel, index, trigger)
-supabase/migrations/0001_schema.sql
-
-# 2. RLS Policies (WAJIB - keamanan data)
-supabase/migrations/0002_policies.sql
-
-# 3. Storage bucket private + policy storage
-supabase/migrations/0003_storage.sql
-
-# 4. Seed data (compliance domains, requirements, rules)
-supabase/seed.sql
-```
-
-Atau dengan Supabase CLI:
-
-```bash
-npx supabase db push
-```
-
-### 4. Setup Storage bucket
-
-File `0003_storage.sql` sudah membuat bucket `documents` dengan:
-- `public = false` (PRIVATE — jangan ubah!)
-- Maksimal 10MB per file
-- Hanya MIME type dokumen yang diizinkan
-
-Verifikasi di **Dashboard → Storage**: bucket `documents` harus **tidak
-berlogo "Public"**.
-
-### 5. Jalankan development server
-
-```bash
-npm run dev
-```
-
-Buka `http://localhost:5173`.
-
----
-
-## Setup Roles: Admin & Consultant Pertama
-
-### Buat Admin Platform pertama
-
-1. Daftar akun biasa lewat aplikasi (mis. `admin@reguflow.test`).
-2. Dapatkan user ID:
-   ```sql
-   select id, email from auth.users;
-   ```
-3. Jalankan SQL (ganti `<ADMIN_USER_ID>`):
-   ```sql
-   insert into public.organizations (id, name, type, created_by)
-   values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ReguFlow Platform', 'platform', '<ADMIN_USER_ID>')
-   on conflict (id) do nothing;
-
-   insert into public.organization_members (organization_id, user_id, role, status)
-   values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '<ADMIN_USER_ID>', 'admin', 'active')
-   on conflict (organization_id, user_id) do nothing;
-
-   update public.profiles set default_role = 'admin' where id = '<ADMIN_USER_ID>';
-   ```
-4. Logout lalu login kembali. Menu **Admin** akan muncul di sidebar.
-
-### Buat user Consultant
-
-```sql
-insert into public.organizations (name, type, created_by)
-values ('Konsultan Sejahtera', 'consultant_agency', '<CONSULTANT_USER_ID>');
-
-insert into public.organization_members (organization_id, user_id, role, status)
-values ('<org_id_baru>', '<CONSULTANT_USER_ID>', 'consultant', 'active');
-
-update public.profiles set default_role = 'consultant' where id = '<CONSULTANT_USER_ID>';
-```
-
----
-
-## Build & Preview
-
-```bash
-npm run build      # typecheck + production build
-npm run preview    # preview build hasil
-npm run typecheck  # cek TypeScript tanpa build
-npm audit          # cek dependency security
-```
+> Catatan: versi awal proyek ini memakai Supabase + Row Level Security. Sekarang
+> seluruh otorisasi ditegakkan di lapisan API Express (lihat
+> [Keamanan](#keamanan)).
 
 ---
 
 ## Struktur Project
 
 ```
-reguflow/
-├── src/
-│   ├── app/                    # App entry & router (lazy loading)
-│   │   ├── App.tsx
-│   │   └── router.tsx
-│   ├── components/
-│   │   ├── ui/                 # Button, Card, Input, Modal, Toast, dll
-│   │   ├── layout/             # PublicLayout, DashboardLayout, guards
-│   │   ├── common/             # CommentSection
-│   │   └── compliance/         # ComplianceJourney
-│   ├── features/               # (opsional - feature modules)
-│   ├── hooks/                  # use-queries, use-scanner, use-document-vault
-│   ├── lib/
-│   │   ├── supabase/           # client, auth-store
-│   │   ├── validation/         # Zod schemas (pesan Bahasa Indonesia)
-│   │   ├── security/           # sanitasi, file validation, audit, guards
-│   │   ├── compliance/         # scanner engine
-│   │   ├── constants/          # label, opsi form, navigation
-│   │   └── utils/              # cn, format tanggal, dll
-│   ├── pages/
-│   │   ├── public/             # landing, cek-kesiapan, tentang, harga, privasi
-│   │   ├── auth/               # login, register, verify-email
-│   │   ├── dashboard/          # UMKM app pages
-│   │   ├── consultant/         # consultant panel
-│   │   └── admin/              # admin panel
-│   ├── types/                  # TypeScript types (database rows & domain)
-│   └── styles/                 # Tailwind
-├── supabase/
-│   ├── migrations/
-│   │   ├── 0001_schema.sql     # semua tabel + index + trigger
-│   │   ├── 0002_policies.sql   # RLS policies (WAJIB)
-│   │   └── 0003_storage.sql    # bucket private + storage policies
-│   └── seed.sql                # compliance domains, requirements, rules
-├── .env.example
-├── package.json
-├── tailwind.config.ts
-├── tsconfig.json
-└── vite.config.ts
+/                        frontend (Vite + React + Tailwind)
+  src/app/               App, router, layout
+  src/pages/             halaman (public, dashboard, admin, consultant)
+  src/components/ui/     komponen dasar (button, modal, qr-code, dll.)
+  src/components/common/ komponen bersama (trakteer-widget)
+  src/lib/api/           API client, auth store, hooks query
+  src/lib/constants/     constants (termasuk trakteer.ts)
+  src/lib/utils/         helper (termasuk qr.ts)
+server/                  backend (Express + Drizzle + Neon)
+  src/routes/            endpoint per domain
+  src/middleware/        auth, error handler, logger, upload
+  src/db/                schema.ts, client.ts, seed.ts
+  migrations/            SQL migration hasil drizzle-kit
+vercel.json              SPA fallback + security headers (CSP)
+_headers                 versi Netlify/Cloudflare dari security headers
+```
+
+## Cara Install
+
+### 1. Clone & install dependencies
+
+```bash
+git clone https://github.com/kagekkaget/reguflow-1-kk.git
+cd reguflow-1-kk
+npm install
+cd server && npm install && cd ..
+```
+
+### 2. Environment variables
+
+**Frontend** — salin `.env.example` menjadi `.env` di root:
+
+```env
+VITE_API_URL=http://localhost:3000
+```
+
+**Backend** — salin `server/.env.example` menjadi `server/.env`:
+
+```env
+DATABASE_URL=postgresql://user:password@ep-xxx.pooler.neon.tech/neondb?sslmode=require
+JWT_ACCESS_SECRET=ganti-dengan-random-string-panjang
+JWT_REFRESH_SECRET=ganti-dengan-random-string-lain
+PORT=3000
+FRONTEND_URL=http://localhost:5173
+UPLOAD_DIR=./storage/documents
+MAX_UPLOAD_BYTES=10485760
+NODE_ENV=development
+```
+
+Generate secret dengan:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+> ⚠️ `DATABASE_URL` dan kedua JWT secret **hanya** ada di `server/.env`
+> (sudah di-`.gitignore`). Jangan pernah menambahkannya ke file `.env` frontend.
+
+### 3. Setup database (Neon)
+
+1. Buat project di [neon.tech](https://neon.tech), salin *connection string*
+   (gunakan pooled connection + `sslmode=require`).
+2. Apply schema:
+
+   ```bash
+   cd server
+   npm run db:migrate   # apply server/migrations/*.sql
+   # npm run db:push    # alternatif saat pengembangan (tanpa file migration)
+   ```
+3. Isi data master (idempotent — aman dijalankan berulang):
+
+   ```bash
+   npm run db:seed      # compliance domains + requirements
+   ```
+4. Inspeksi data kalau perlu: `npm run db:studio` (Drizzle Studio).
+
+### 4. Jalankan development server
+
+```bash
+# terminal 1 — API
+cd server && npm run dev        # http://localhost:3000  (GET /health)
+
+# terminal 2 — frontend
+npm run dev                     # http://localhost:5173
 ```
 
 ---
 
-## Fitur MVP
+## Setup Role: Admin & Consultant Pertama
 
-- ✅ Landing page (hero, problem, solusi, fitur, cara kerja, pricing, disclaimer)
-- ✅ Cek kesiapan gratis (public, insert-only via RLS)
-- ✅ Register / Login / Logout (Supabase Auth)
-- ✅ Protected routes + role-based access (owner, staff, consultant, admin, viewer)
-- ✅ Dashboard UMKM (skor kesiapan, dokumen kurang, task mendesak, rekomendasi)
-- ✅ Onboarding wizard 4 langkah (simpan draft)
-- ✅ Profil usaha CRUD
-- ✅ Produk CRUD + detail multi-tab (ringkasan, bahan, dokumen, checklist, komentar)
-- ✅ Compliance scanner (rule engine sederhana, skor 0-100)
-- ✅ Compliance case otomatis + checklist dinamis
-- ✅ Document vault (upload private, filter, search, preview/download signed URL)
-- ✅ Task CRUD (prioritas, jatuh tempo, status)
-- ✅ Reminder (dokumen kadaluarsa + task jatuh tempo, in-app)
-- ✅ Pendamping/konsultan (request engagement, riwayat)
-- ✅ Consultant dashboard + client list + client detail
-- ✅ Admin dashboard (stats, users, businesses, rules, templates, documents, reports)
-- ✅ Audit log (login, upload, view, delete, status update, dll)
-- ✅ Security hardening (lihat di bawah)
+Role disimpan di kolom `users.default_role` (enum: `owner`, `staff`,
+`consultant`, `admin`, `viewer`), dan keanggotaan per organisasi di
+`organization_members.role`. Role selalu dibaca ulang dari database setiap
+request, jadi mengubahnya langsung berlaku setelah login ulang.
 
-### Aplikasi TIDAK melakukan:
-- ❌ Submit resmi ke OSS / SIHALAL / BPOM / DJP
-- ❌ Menggantikan portal pemerintah
-- ❌ Menggantikan konsultan hukum / pajak
+1. Daftar akun biasa lewat aplikasi (mis. `admin@reguflow.test`).
+2. Naikkan role-nya di **Neon SQL Editor** atau Drizzle Studio:
+
+   ```sql
+   update public.users
+   set default_role = 'admin'
+   where email = 'admin@reguflow.test';
+   ```
+3. Login ulang — menu admin (`/admin/*`) langsung terbuka.
+
+Untuk konsultan, set `default_role = 'consultant'`; akses ke data klien tetap
+dibatasi lewat tabel `consultant_engagements` (hanya engagement berstatus
+`active` yang terlihat).
 
 ---
 
-## Compliance Scanner
+## API Overview
 
-Scanner (`src/lib/compliance/scanner.ts`) membaca:
-- Data usaha (NIB, skala, lokasi)
-- Data produk (makanan/minuman, kosmetik, bahan hewani, dll)
-- Dokumen yang sudah diupload
-- Jawaban assessment publik
+| Prefix | Fungsi |
+| --- | --- |
+| `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `GET /auth/me`, `PATCH /auth/me` | Auth & profil |
+| `/businesses` | CRUD usaha + metrik skala kecil |
+| `/products`, `/ingredients`, `/suppliers` | Data produk (skala kecil) |
+| `/assessments` | Kuis / assessment mandiri |
+| `/compliance` | Case kepatuhan + checklist items |
+| `/documents` | Upload, versi, preview & download (file private) |
+| `/tasks`, `/reminders` | Tugas & pengingat |
+| `/organizations`, `/engagements`, `/comments`, `/notifications` | Multi-tenant + kerja sama konsultan |
+| `/rules` | Katalog regulasi (sumber tunggal aturan) |
+| `/admin/*` | Statistik, user, bisnis, dokumen, audit log (khusus admin) |
+| `GET /health` | Liveness probe |
 
-Output:
-- **Skor 0-100** dengan bobot: NIB (15), data usaha (10), produk (10), daftar
-  bahan (15), supplier (10), foto produk (10), alur produksi (10), Manual SJPH
-  (15), SOP kebersihan (5)
-- **Status**: 0-30 Belum Siap · 31-60 Perlu Dilengkapi · 61-80 Hampir Siap ·
-  81-100 Siap Direview
-- Dokumen yang kurang, rekomendasi, compliance case yang disarankan
+Event audit tercatat di `audit_logs` (`user_login`, `user_registered`,
+`member_invited`, `profile_updated`, `business_updated`, `scanner_run`).
+
+## Keamanan
+
+- **Auth:** access token JWT berumur pendek (15 menit) di memory + localStorage,
+  refresh token di **httpOnly cookie** (tidak bisa dibaca JS). Refresh token
+  disimpan di `refresh_tokens` sehingga bisa dirotasi dan dicabut saat logout.
+- **Otorisasi di API:** middleware `authenticate` memuat user, role, dan
+  organisasi **dari database** (payload JWT tidak dipercaya), tiap route
+  mengecek kepemilikan organisasi, dan `/admin/*` dilindungi `requireAdmin`.
+- **Password** di-hash `bcryptjs`; input divalidasi Zod di server dan client.
+- **Rate limiting** 100 request / 15 menit / IP + `helmet` + CORS dibatasi ke
+  `FRONTEND_URL` (dengan `credentials`).
+- **Dokumen:** disimpan di `UPLOAD_DIR` (folder private, tidak di-serve statis),
+  maks 10MB per file, hanya bisa diakses lewat endpoint terautentikasi, dan
+  soft delete lewat `deleted_at`.
+- **Audit trail** event penting tercatat di `audit_logs`.
+- **CSP** `script-src 'self'` (lihat `vercel.json`) — tidak ada script pihak
+  ketiga sama sekali, termasuk widget dukungan (makanya QR dibuat lokal).
+- Tidak ada secret di repository: `.env`, `server/.env`, dan `server/storage`
+  sudah di-`.gitignore`.
 
 ---
 
-## Security Checklist — Yang Sudah Diterapkan
+## Dukungan & Sumber Terbuka
 
-### Auth & Authorization
-- ✅ Supabase Auth (tidak ada password manual di database)
-- ✅ Protected route untuk semua halaman dashboard
-- ✅ Role-based route protection (`RequireAuth`, `RequireAdmin`, `RequireConsultant`)
-- ✅ Cek role di **frontend DAN database (RLS)** — never trust client
-- ✅ Auto-create profile via trigger saat user register
+ReguFlow dirilis sebagai proyek terbuka di bawah lisensi **MIT** — boleh
+dipakai, dimodifikasi, dan disebarluaskan secara gratis, tanpa iklan dan tanpa
+akun berbayar. Atribut yang diminta: **Open Source oleh MZF - 2026**.
 
-### Database (RLS)
-- ✅ RLS aktif di **semua** tabel user-owned
-- ✅ User hanya bisa akses data organization miliknya
-- ✅ Konsultan hanya bisa akses klien dengan engagement aktif
-- ✅ Admin platform bisa akses semua data
-- ✅ Assessment publik: **insert-only**, tidak bisa read (anon)
-- ✅ Policy insert/update/delete dengan `with check` untuk mencegah horizontal privilege escalation
-- ✅ Foreign key constraints + indexes di kolom filter/search
+```bash
+git clone https://github.com/kagekkaget/reguflow-1-kk.git
+```
 
-### Storage
-- ✅ Bucket `documents` **private** (`public = false`)
-- ✅ Tidak ada public URL untuk dokumen sensitif
-- ✅ Preview/download **hanya** via signed URL (berlaku 60 detik)
-- ✅ Validasi file: ukuran maks 10MB, MIME type allowlist, extension allowlist
-- ✅ Tolak executable (exe, sh, bat, js, html, php, py, jar, zip, dll)
-- ✅ Sanitasi nama file & path storage berbentuk `documents/<org_id>/<doc_id>/<filename>`
-- ✅ Storage policy memverifikasi org_id di path folder (RLS storage)
+Unduhan cepat: `https://github.com/kagekkaget/reguflow-1-kk/archive/refs/heads/main.zip`
 
-### Application Security
-- ✅ Validasi semua form dengan Zod (pesan Bahasa Indonesia)
-- ✅ Escape output user-generated content (React default + `escapeHtml` util)
-- ✅ Tidak menggunakan `dangerouslySetInnerHTML`
-- ✅ Deteksi pola berbahaya (XSS, path traversal) di input
-- ✅ Sanitasi input text (kontrol karakter, panjang)
-- ✅ IDOR protection via RLS + validasi ownership
-- ✅ Error message aman (tidak membocorkan stack trace ke user)
-- ✅ Validasi route params UUID (`validateUuidParam`)
-- ✅ Loading / empty / error state di semua halaman
-- ✅ Service role key TIDAK PERNAH di frontend
+Kalau ReguFlow membantu kamu (atau kamu cuma mau traktir kopi), tersedia widget
+dukungan mengambang di kanan bawah aplikasi.
 
-### Audit Log
-Mencatat: `user_login`, `user_logout`, `document_uploaded`, `document_viewed`,
-`document_downloaded`, `document_deleted`, `compliance_status_updated`,
-`checklist_updated`, `task_created`, `role_changed`, `member_invited`,
-`profile_updated`, `business_updated`, `scanner_run`
+### Widget Trakteer + QR
+
+Komponen: `src/components/common/trakteer-widget.tsx` (dimuat *lazy* dari
+`src/app/App.tsx`, jadi tidak menambah bundle awal).
+
+**Tab "Traktir"**
+- Nominal dasar **Rp6.000** — tombol cepat adalah kelipatannya: Rp6.000,
+  Rp12.000, Rp18.000, Rp24.000, Rp30.000, Rp36.000.
+- Nominal custom diterima dan otomatis dibulatkan ke kelipatan Rp6.000 terdekat
+  (batas atas Rp1.000.000).
+- Setiap pilihan menampilkan **QR code** yang berisi tautan
+  `https://trakteer.id/<username>/tip?amount=<nominal>` — pindai dengan kamera
+  HP untuk membayar dari perangkat lain.
+- Tombol **Buka Trakteer** membuka tab baru; pembayaran selalu diselesaikan di
+  halaman resmi Trakteer. Tidak ada data akun ReguFlow yang dikirim, dan
+  tidak ada pembayaran yang diproses di sisi aplikasi (Trakteer tidak
+  menyediakan API auto-checkout).
+
+**Tab "Source code"**
+- Tombol **Download ZIP** dan tautan repositori.
+- Perintah `git clone` + URL repositori yang bisa disalin sekali klik.
+- QR tambahan untuk membuka arsip ZIP langsung dari browser HP.
+
+Tombol **Sembunyikan** hanya menyembunyikan widget untuk sesi itu
+(`sessionStorage`), jadi widget muncul lagi di kunjungan berikutnya.
+
+### Kenapa tidak memakai widget/iframe resmi Trakteer?
+
+CSP aplikasi mengunci `script-src 'self'`, yang otomatis memblokir script dan
+iframe Trakteer. Menambah origin Trakteer ke `script-src` berarti membuka celah
+XSS — lebih mahal daripada nilainya. Solusinya: QR dihasilkan **lokal** dan
+tautan dibuka lewat tab baru, sehingga widget tetap berfungsi 100% tanpa
+melonggarkan CSP.
+
+### Menyesuaikan widget
+
+Semua nilai ada di `src/lib/constants/trakteer.ts` — tidak perlu menyentuh
+komponen:
+
+| Konstanta | Arti |
+| --- | --- |
+| `TRAKTEER_USERNAME` | Tujuan traktiran (`https://trakteer.id/<username>`) |
+| `TRAKTEER_BASE_NOMINAL` | Nominal dasar / kelipatan (default `6000`) |
+| `TRAKTEER_QUICK_PICK_COUNT` | Jumlah tombol nominal cepat (default `6`) |
+| `TRAKTEER_MAX_NOMINAL` | Batas nominal custom (default `1000000`) |
+| `TRAKTEER_WIDGET_MESSAGE`, `TRAKTEER_QR_CAPTION` | Teks di widget |
+| `REPO_URL`, `REPO_BRANCH` | Sumber tautan ZIP & atribut sumber terbuka |
+| `OPEN_SOURCE_CREDIT`, `OPEN_SOURCE_LICENSE` | Teks atribut di widget & README |
+
+Generator QR: `src/lib/utils/qr.ts` (`buildQrGrid` + `qrGridToSvgPath`) dengan
+error correction level **M**, dirender oleh `src/components/ui/qr-code.tsx`
+sebagai SVG (`shapeRendering="crispEdges"`, quiet zone 2 modul). Tidak ada
+request jaringan sama sekali saat QR ditampilkan.
+
+## Skrip yang Tersedia
+
+| Perintah | Lokasi | Fungsi |
+| --- | --- | --- |
+| `npm run dev` | root | Vite dev server (port 5173) |
+| `npm run build` | root | `tsc --noEmit` + build produksi ke `dist/` |
+| `npm run preview` | root | Coba hasil build secara lokal |
+| `npm run typecheck` | root | Type-check frontend |
+| `npm run lint` | root | ESLint (butuh `eslint.config.js`; belum ada di repo) |
+| `npm run audit` | root | `npm audit` untuk frontend |
+| `npm run dev` | `server/` | API dengan `tsx watch` (port 3000) |
+| `npm run build` / `npm start` | `server/` | Compile TS ke `dist/` lalu jalankan |
+| `npm run typecheck` | `server/` | Type-check backend |
+| `npm run db:generate` / `db:migrate` / `db:push` | `server/` | Drizzle Kit (migration) |
+| `npm run db:seed` | `server/` | Isi compliance domains + requirements |
+| `npm run db:studio` | `server/` | Drizzle Studio |
+
+---
+
+## Performance
+
+- Lazy loading seluruh halaman (code splitting) — widget dukungan juga *lazy*,
+  hanya dimuat sebagai chunk terpisah (~14 kB gzip) setelah aplikasi tampil.
+- Manual chunks untuk React, TanStack Query, dan library form.
+- Skeleton loading + TanStack Query caching (`staleTime` 30s).
+- Debounced search dan index pada kolom yang sering difilter.
+- Build target ES2020, tanpa sourcemap di production.
 
 ---
 
 ## Production Checklist
 
-Sebelum deploy ke production, pastikan:
+- [ ] `DATABASE_URL` produksi dengan `sslmode=require` (branch/cluster terpisah dari dev)
+- [ ] JWT secret baru & berbeda (`JWT_ACCESS_SECRET` ≠ `JWT_REFRESH_SECRET`), `NODE_ENV=production`
+- [ ] `FRONTEND_URL` = domain frontend produksi (untuk CORS `credentials`)
+- [ ] `UPLOAD_DIR` di persistent volume atau dipindah ke object storage
+- [ ] Backup Neon (PITR / scheduled backup) aktif
+- [ ] `VITE_API_URL` benar saat build; bila API beda origin, tambahkan ke `connect-src` CSP
+- [ ] Rate limiting / WAF di depan API bila perlu
+- [ ] `npm audit` (root & `server/`) bersih
+- [ ] Security headers terpasang (`vercel.json` atau `_headers`)
+- [ ] Uji silang role: owner, staff, consultant (hanya klien aktif), viewer (read-only), admin
+- [ ] Uji alur dokumen: upload → preview → download → delete (soft delete)
+- [ ] Pastikan tidak ada secret yang ter-commit (`.env`, `server/.env`, `server/storage/`)
+- [ ] Sesuaikan `TRAKTEER_USERNAME` / `REPO_URL` bila kamu mem-brand ulang
 
-- [ ] **RLS aktif** — verifikasi dengan query test sebagai user berbeda
-- [ ] **Bucket `documents` private** — cek di Dashboard → Storage
-- [ ] Semua **environment variables** benar (hanya anon key di frontend)
-- [ ] **Service role key** hanya di server environment, TIDAK di frontend
-- [ ] Aktifkan **email verification** di Supabase Auth (jika perlu)
-- [ ] Setup **backup database** (Supabase automated backups / PITR)
-- [ ] Setup **error monitoring** (mis. Sentry)
-- [ ] Setup **rate limiting** jika menambah backend custom
-- [ ] Setup **security headers** di hosting/CDN:
-  - `Content-Security-Policy`
-  - `X-Frame-Options: DENY`
-  - `X-Content-Type-Options: nosniff`
-  - `Referrer-Policy: strict-origin-when-cross-origin`
-  - `Permissions-Policy`
-- [ ] Jalankan `npm audit` dan fix vulnerability
-- [ ] Test akses antar role (owner tidak bisa lihat org lain, konsultan hanya
-      klien aktifnya, viewer tidak bisa edit)
-- [ ] Review dependency — hanya package stabil & terpercaya
-- [ ] Pastikan tidak ada secret di repo (`.env` di `.gitignore`)
-- [ ] Aktifkan **soft delete** untuk data penting (dokumen sudah soft-delete
-      via `deleted_at`)
-- [ ] Test alur upload → preview → download → delete dokumen
+### Contoh security headers
 
-### Contoh security headers (nginx / vercel.json / _headers)
+Vercel memakai `vercel.json`; Netlify/Cloudflare memakai `_headers`.
 
 ```
-Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co;
+Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self' data:;
 X-Frame-Options: DENY
 X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: camera=(), microphone=(), geolocation=()
 ```
 
+> `connect-src 'self'` berarti frontend hanya boleh memanggil API di origin yang
+> sama. Kalau API di-host di domain terpisah, ubah menjadi
+> `connect-src 'self' https://api.example.com` **atau** proxy `/api` lewat
+> rewrite hosting agar tetap same-origin.
+
 ---
 
 ## Deployment
 
-### Vercel / Netlify / Cloudflare Pages
+**Frontend (Vercel)**
+1. Import repo → framework Vite (dipilih otomatis oleh `vercel.json`).
+2. Build command `npm run build`, output `dist`.
+3. Environment variable: `VITE_API_URL`.
+4. SPA rewrite sudah dikonfigurasi (`/(*)` → `/index.html`) + security headers.
+   Alternatif Netlify/Cloudflare: gunakan file `_headers`.
 
-1. Build command: `npm run build`
-2. Output directory: `dist`
-3. Environment variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-4. Tambahkan security headers di config hosting (lihat di atas)
-
-### Catatan penting
-- Pastikan **SPA fallback** aktif (redirect semua route ke `index.html`) karena
-  menggunakan React Router
-- Gunakan HTTPS (Supabase Auth memerlukan HTTPS di production)
-
----
-
-## Performance
-
-- Lazy loading semua halaman dashboard/admin/consultant (code splitting)
-- Manual chunks untuk react, supabase, query, form libraries
-- Skeleton loading & TanStack Query caching (staleTime 30s)
-- Debounced search
-- Index database di kolom yang sering difilter
-- Optimized build (target ES2020, no sourcemap di production)
+**Backend (`server/`)**
+1. Deploy ke runtime Node (Railway, Render, Fly.io, atau VPS) — build
+   `npm run build`, start `npm start`.
+2. Jalankan `npm run db:migrate` setiap rilis.
+3. Isi env: `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`,
+   `FRONTEND_URL`, `PORT`, `UPLOAD_DIR`, `NODE_ENV`.
+4. Jika filesystem instan bersifat sementara, pasang persistent disk (atau
+   pindahkan penyimpanan file ke object storage) supaya dokumen tidak hilang.
+5. Cek sehat dengan `GET /health`.
 
 ---
 
 ## Development Notes
 
-- Semua teks aplikasi dalam **Bahasa Indonesia**
-- Pesan error formulir dalam Bahasa Indonesia
-- Gunakan `npm run typecheck` sebelum commit untuk memastikan TypeScript aman
-- Struktur database siap untuk fitur masa depan (email/WhatsApp reminder via
-  kolom `channel` di tabel `reminders`)
+- Semua teks aplikasi dan pesan error formulir dalam **Bahasa Indonesia**.
+- Jalankan `npm run typecheck` di root **dan** `server/` sebelum commit.
+- Kolom `channel` di tabel `reminders` sudah disiapkan untuk pengiriman
+  reminder via email/WhatsApp.
 
 ## TODO (Pengembangan Selanjutnya)
 
 - [ ] Pengiriman reminder via email/WhatsApp (struktur DB sudah siap)
-- [ ] Manajemen supplier & bahan (tabel sudah ada)
-- [ ] Versi dokumen (tabel `document_versions` sudah ada)
+- [ ] UI versi dokumen (`document_versions` sudah ada)
 - [ ] Notifikasi real-time (tabel `notifications` sudah ada)
 - [ ] Export laporan PDF
 - [ ] Multi-business per organisasi
+- [ ] Menyimpan dokumen di object storage (S3-compatible)
+
+---
+
+## Lisensi & Kredit
+
+- **Lisensi:** MIT © 2026 MZF — lihat [`LICENSE`](./LICENSE)
+- **QR code:** [`qrcode`](https://github.com/soldair/node-qrcode) (MIT), dipakai
+  tanpa dependensi CDN/client-side fetch
+- **Dukungan pengembangan:** Trakteer — [`trakteer.id/perpus_opera`](https://trakteer.id/perpus_opera)
+- **Atribut:** *Open Source oleh MZF - 2026* — mohon pertahankan kredit ini pada
+  turunan proyek.
 
 ---
 
@@ -384,3 +392,6 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
 ReguFlow adalah alat bantu pengelolaan dokumen dan kesiapan kepatuhan. Keputusan
 akhir dan pengajuan resmi tetap dilakukan melalui portal resmi pemerintah atau
 pendamping/konsultan terkait.
+
+
+

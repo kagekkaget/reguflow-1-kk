@@ -1,17 +1,21 @@
 /*
   ReguFlow - Security headers (Netlify / Cloudflare Pages style)
   Letakkan file ini di root project; hosting akan menerapkannya.
+  Versi Vercel: lihat `vercel.json`.
 */
 
 /*
   Content-Security-Policy:
   - default-src 'self' (hanya resource dari domain sendiri)
-  - connect-src: izinkan API Supabase
+  - script-src 'self'  -> tidak ada script pihak ketiga (termasuk widget
+    pembayaran eksternal; QR dukungan dibuat lokal di dalam app)
+  - connect-src 'self' -> hanya API sendiri; jika API Express berada di domain
+    lain, tambahkan origin-nya, mis.: connect-src 'self' https://api.example.com
   - style-src 'unsafe-inline' dibutuhkan oleh Tailwind (inline styles)
 */
 /*
   /:*
-  Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co; font-src 'self' data:;
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self' data:;
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

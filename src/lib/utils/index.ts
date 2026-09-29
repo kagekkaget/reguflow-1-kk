@@ -22,6 +22,19 @@ export function formatBytes(bytes: number, decimals = 0): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
 }
 
+/** Format angka ke Rupiah, contoh: 6000 -> "Rp6.000". */
+export function formatRupiah(value: number): string {
+  if (!Number.isFinite(value)) return "Rp0";
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+  })
+    .format(value)
+    .replace(/\s/g, "\u00a0"); // rapikan spasi tipis agar tidak patah baris
+}
+
 /** Format tanggal ISO ke format Indonesia. */
 export function formatDateID(
   value: string | Date | null | undefined,
@@ -120,4 +133,36 @@ export function isValidUUID(value: string | null | undefined): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
     value
   );
+}
+
+/**
+ * Salin teks ke clipboard. `navigator.clipboard` hanya tersedia di konteks aman
+ * (HTTPS/localhost), jadi disiapkan fallback textarea + execCommand.
+ * Mengembalikan true bila berhasil.
+ */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // lanjut ke fallback
+  }
+
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
 }
